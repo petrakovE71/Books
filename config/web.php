@@ -1,5 +1,9 @@
 <?php
 
+// Load environment variables
+$dotenv = Dotenv\Dotenv::createImmutable(__DIR__ . '/..');
+$dotenv->load();
+
 $params = require __DIR__ . '/params.php';
 $db = require __DIR__ . '/db.php';
 
@@ -7,6 +11,8 @@ $config = [
     'id' => 'basic',
     'basePath' => dirname(__DIR__),
     'bootstrap' => ['log'],
+    'language' => 'ru-RU',
+    'charset' => 'UTF-8',
     'aliases' => [
         '@bower' => '@vendor/bower-asset',
         '@npm'   => '@vendor/npm-asset',
@@ -42,15 +48,62 @@ $config = [
             ],
         ],
         'db' => $db,
-        /*
+        'authManager' => [
+            'class' => 'yii\rbac\DbManager',
+            'cache' => 'cache',
+        ],
         'urlManager' => [
             'enablePrettyUrl' => true,
             'showScriptName' => false,
             'rules' => [
+                'books' => 'book/index',
+                'book/<id:\d+>' => 'book/view',
+                'authors' => 'author/index',
+                'author/<id:\d+>' => 'author/view',
+                'subscribe' => 'subscription/create',
+                'report' => 'report/index',
             ],
         ],
-        */
+        // Repositories
+        'bookRepository' => [
+            'class' => 'app\common\repositories\BookRepository',
+        ],
+        'subscriptionRepository' => [
+            'class' => 'app\common\repositories\SubscriptionRepository',
+        ],
+        // Services
+        'bookService' => [
+            'class' => 'app\common\services\BookService',
+            'bookRepository' => function() { return Yii::$app->get('bookRepository'); },
+        ],
+        'subscriptionService' => [
+            'class' => 'app\common\services\SubscriptionService',
+            'subscriptionRepository' => function() { return Yii::$app->get('subscriptionRepository'); },
+        ],
+        'notificationService' => [
+            'class' => 'app\common\services\NotificationService',
+            'subscriptionRepository' => function() { return Yii::$app->get('subscriptionRepository'); },
+        ],
+        // SMS Provider
+        'smsProvider' => [
+            'class' => 'app\components\sms\SmsPilotProvider',
+            'apiKey' => $_ENV['SMS_PILOT_API_KEY'] ?? 'XXXXXXXXXXXXYYYYYYYYYYYYZZZZZZZZXXXXXXXXXXXXYYYYYYYYYYYYZZZZZZZZ',
+            'testMode' => filter_var($_ENV['SMS_TEST_MODE'] ?? true, FILTER_VALIDATE_BOOLEAN),
+        ],
+        // SMS Service
+        'smsService' => [
+            'class' => 'app\components\sms\SmsService',
+            'provider' => function() { return Yii::$app->get('smsProvider'); },
+        ],
     ],
+    'on beforeRequest' => function () {
+        // Register event handler for Book created
+        \yii\base\Event::on(
+            \app\models\Book::class,
+            \app\common\events\BookCreatedEvent::EVENT_NAME,
+            [new \app\common\handlers\BookCreatedHandler(), 'handle']
+        );
+    },
     'params' => $params,
 ];
 

@@ -2,13 +2,13 @@
 
 return [
     'class' => 'yii\db\Connection',
-    'dsn' => 'mysql:host=localhost;dbname=yii2basic',
-    'username' => 'root',
-    'password' => '',
-    'charset' => 'utf8',
+    'dsn' => 'mysql:host=' . ($_ENV['DB_HOST'] ?? 'localhost') . ';dbname=' . ($_ENV['DB_NAME'] ?? 'book_catalog'),
+    'username' => $_ENV['DB_USERNAME'] ?? 'root',
+    'password' => $_ENV['DB_PASSWORD'] ?? '',
+    'charset' => 'utf8mb4',
 
     // Schema cache options (for production environment)
-    //'enableSchemaCache' => true,
-    //'schemaCacheDuration' => 60,
-    //'schemaCache' => 'cache',
+    'enableSchemaCache' => !YII_DEBUG,
+    'schemaCacheDuration' => 3600,
+    'schemaCache' => 'cache',
 ];

@@ -1,0 +1,68 @@
+<?php
+
+declare(strict_types=1);
+
+use app\models\NotificationQueue;
+
+return [
+    'pending' => [
+        'id' => 1,
+        'subscription_id' => 1,
+        'book_id' => 1,
+        'phone' => '+79991234567',
+        'message' => 'New book: Test Book 1',
+        'status' => NotificationQueue::STATUS_PENDING,
+        'retry_count' => 0,
+        'max_retries' => 3,
+        'error_message' => null,
+        'sent_at' => null,
+        'next_retry_at' => null,
+        'created_at' => 1577836800,
+        'updated_at' => 1577836800,
+    ],
+    'processing' => [
+        'id' => 2,
+        'subscription_id' => 2,
+        'book_id' => 2,
+        'phone' => '+79997654321',
+        'message' => 'New book: Test Book 2',
+        'status' => NotificationQueue::STATUS_PROCESSING,
+        'retry_count' => 1,
+        'max_retries' => 3,
+        'error_message' => null,
+        'sent_at' => null,
+        'next_retry_at' => null,
+        'created_at' => 1577836800,
+        'updated_at' => 1577836800,
+    ],
+    'sent' => [
+        'id' => 3,
+        'subscription_id' => 1,
+        'book_id' => 2,
+        'phone' => '+79991234567',
+        'message' => 'New book: Test Book 2',
+        'status' => NotificationQueue::STATUS_SENT,
+        'retry_count' => 1,
+        'max_retries' => 3,
+        'error_message' => null,
+        'sent_at' => 1577836900,
+        'next_retry_at' => null,
+        'created_at' => 1577836800,
+        'updated_at' => 1577836900,
+    ],
+    'failed' => [
+        'id' => 4,
+        'subscription_id' => 2,
+        'book_id' => 1,
+        'phone' => '+79997654321',
+        'message' => 'New book: Test Book 1',
+        'status' => NotificationQueue::STATUS_FAILED,
+        'retry_count' => 3,
+        'max_retries' => 3,
+        'error_message' => 'SMS delivery failed',
+        'sent_at' => null,
+        'next_retry_at' => null,
+        'created_at' => 1577836800,
+        'updated_at' => 1577836800,
+    ],
+];

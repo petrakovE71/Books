@@ -31,3 +31,10 @@ tests/_support/_generated
 
 #vagrant folder
 /.vagrant
+
+# environment variables
+.env
+
+# uploaded files
+/web/uploads/*
+!/web/uploads/.gitkeep
