@@ -1,0 +1,19 @@
+# Codeception Test Suite Configuration
+
+# suite for integration tests.
+# test component interactions and external services.
+# RUN `build` COMMAND AFTER ADDING/REMOVING MODULES.
+
+actor: IntegrationTester
+modules:
+    enabled:
+        - Asserts
+        - Yii2:
+            part: [orm, fixtures, email]
+        - Db:
+            dsn: 'mysql:host=localhost;dbname=books_test'
+            user: 'root'
+            password: ''
+            dump: tests/_data/dump.sql
+            populate: false
+            cleanup: false
