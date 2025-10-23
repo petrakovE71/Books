@@ -7,17 +7,16 @@ namespace app\commands;
 use Yii;
 use yii\console\Controller;
 use yii\console\ExitCode;
-use app\models\NotificationQueue;
-use app\components\sms\SmsService;
-use app\common\exceptions\SmsDeliveryException;
+use app\common\services\NotificationProcessingService;
 
 /**
  * NotificationController
- *
+ * Console controller for notification queue management
  */
 class NotificationController extends Controller
 {
     /**
+     * Maximum number of notifications to process per run
      */
     public int $limit = 100;
 
@@ -40,7 +39,7 @@ class NotificationController extends Controller
     }
 
     /**
-     * Отправить SMS уведомления из очереди
+     * Send SMS notifications from queue
      *
      * @return int Exit code
      */
@@ -49,101 +48,39 @@ class NotificationController extends Controller
         $this->stdout("Starting notification processing...\n", \yii\helpers\Console::FG_GREEN);
         $this->stdout("Limit: {$this->limit} notifications\n");
 
-        /** @var SmsService $smsService */
-        $smsService = Yii::$app->get('smsService');
+        /** @var NotificationProcessingService $service */
+        $service = Yii::$app->get('notificationProcessingService');
 
-       
-        if (!$smsService->isAvailable()) {
+        // Check service availability
+        if (!$service->isServiceAvailable()) {
             $this->stderr("SMS service is unavailable!\n", \yii\helpers\Console::FG_RED);
             return ExitCode::UNAVAILABLE;
         }
 
-        $this->stdout("SMS Provider: {$smsService->getProviderName()}\n");
+        $this->stdout("SMS Provider: {$service->getProviderName()}\n");
         $this->stdout("Service status: Available\n", \yii\helpers\Console::FG_GREEN);
+        $this->stdout("\n");
 
-       
-        $notifications = NotificationQueue::findReadyForSending($this->limit)->all();
+        try {
+            $result = $service->processQueue($this->limit);
 
-        if (empty($notifications)) {
-            $this->stdout("No notifications to send.\n");
-            return ExitCode::OK;
-        }
-
-        $totalCount = count($notifications);
-        $this->stdout("Found {$totalCount} notifications ready for sending.\n\n", \yii\helpers\Console::FG_CYAN);
-
-        $successCount = 0;
-        $failedCount = 0;
-
-        foreach ($notifications as $i => $notification) {
-            /** @var NotificationQueue $notification */
-
-            $num = $i + 1;
-            $this->stdout("[{$num}/{$totalCount}] Sending to {$notification->phone}... ");
-
-            try {
-               
-                $notification->markAsProcessing();
-
-                // Отправляем SMS
-                $result = $smsService->send(
-                    phone: $notification->phone,
-                    message: $notification->message,
-                    maxRetries: 1 // В console уже есть retry на уровне очереди
-                );
-
-                if ($result) {
-                    // Успешно отправлено
-                    $notification->markAsSent();
-                    $this->stdout("OK\n", \yii\helpers\Console::FG_GREEN);
-                    $successCount++;
-                } else {
-                    // Неудачная отправка - возвращаем в pending для retry
-                    $notification->markAsFailedWithRetry('Failed to send SMS');
-                    $this->stdout("FAILED (will retry)\n", \yii\helpers\Console::FG_YELLOW);
-                    $failedCount++;
-                }
-            } catch (SmsDeliveryException $e) {
-                // Ошибка отправки
-                $notification->markAsFailedWithRetry($e->getMessage());
-                $this->stderr("ERROR: {$e->getMessage()}\n", \yii\helpers\Console::FG_RED);
-                $failedCount++;
-
-                // Логируем ошибку
-                Yii::error(
-                    "Failed to send notification #{$notification->id}: {$e->getMessage()}",
-                    __METHOD__
-                );
-            } catch (\Throwable $e) {
-                // Критическая ошибка - помечаем как permanently failed
-                $notification->markAsPermanentlyFailed($e->getMessage());
-                $this->stderr("CRITICAL ERROR: {$e->getMessage()}\n", \yii\helpers\Console::FG_RED);
-                $failedCount++;
-
-                // Логируем ошибку
-                Yii::error(
-                    "Critical error sending notification #{$notification->id}: {$e->getMessage()}",
-                    __METHOD__
-                );
+            if (!$result->hasProcessed()) {
+                $this->stdout("No notifications to send.\n");
+                return ExitCode::OK;
             }
 
-            // Небольшая задержка между отправками (rate limiting на уровне приложения)
-            usleep(100000); // 0.1 second
+            // Output processing results
+            $this->outputProcessingResult($result);
+
+            return ExitCode::OK;
+        } catch (\RuntimeException $e) {
+            $this->stderr("Error: {$e->getMessage()}\n", \yii\helpers\Console::FG_RED);
+            return ExitCode::UNSPECIFIED_ERROR;
         }
-
-        $this->stdout("\n");
-        $this->stdout("=====================================\n");
-        $this->stdout("Processing completed!\n", \yii\helpers\Console::FG_GREEN);
-        $this->stdout("Total processed: {$totalCount}\n");
-        $this->stdout("Successfully sent: {$successCount}\n", \yii\helpers\Console::FG_GREEN);
-        $this->stdout("Failed: {$failedCount}\n", $failedCount > 0 ? \yii\helpers\Console::FG_RED : \yii\helpers\Console::FG_GREEN);
-        $this->stdout("=====================================\n");
-
-        return ExitCode::OK;
     }
 
     /**
-     * Показать статистику очереди уведомлений
+     * Show notification queue statistics
      *
      * @return int Exit code
      */
@@ -152,53 +89,90 @@ class NotificationController extends Controller
         $this->stdout("Notification Queue Statistics\n", \yii\helpers\Console::FG_CYAN);
         $this->stdout("=====================================\n");
 
-        $stats = [
-            'Pending' => NotificationQueue::find()->where(['status' => NotificationQueue::STATUS_PENDING])->count(),
-            'Processing' => NotificationQueue::find()->where(['status' => NotificationQueue::STATUS_PROCESSING])->count(),
-            'Sent' => NotificationQueue::find()->where(['status' => NotificationQueue::STATUS_SENT])->count(),
-            'Failed' => NotificationQueue::find()->where(['status' => NotificationQueue::STATUS_FAILED])->count(),
+        /** @var NotificationProcessingService $service */
+        $service = Yii::$app->get('notificationProcessingService');
+
+        $stats = $service->getStatistics();
+
+        // Output statistics
+        $statusColors = [
+            'pending' => \yii\helpers\Console::FG_YELLOW,
+            'processing' => \yii\helpers\Console::FG_CYAN,
+            'sent' => \yii\helpers\Console::FG_GREEN,
+            'failed' => \yii\helpers\Console::FG_RED,
         ];
 
-        $total = array_sum($stats);
-
         foreach ($stats as $status => $count) {
-            $color = match($status) {
-                'Pending' => \yii\helpers\Console::FG_YELLOW,
-                'Processing' => \yii\helpers\Console::FG_CYAN,
-                'Sent' => \yii\helpers\Console::FG_GREEN,
-                'Failed' => \yii\helpers\Console::FG_RED,
-                default => \yii\helpers\Console::RESET,
-            };
+            if ($status === 'total') {
+                continue;
+            }
 
-            $this->stdout(str_pad($status . ':', 15), $color);
+            $label = ucfirst($status);
+            $color = $statusColors[$status] ?? \yii\helpers\Console::RESET;
+
+            $this->stdout(str_pad($label . ':', 15), $color);
             $this->stdout("{$count}\n");
         }
 
         $this->stdout("=====================================\n");
-        $this->stdout("Total: {$total}\n", \yii\helpers\Console::FG_CYAN);
+        $this->stdout("Total: {$stats['total']}\n", \yii\helpers\Console::FG_CYAN);
 
         return ExitCode::OK;
     }
 
     /**
-     * Очистить старые отправленные уведомления (старше 30 дней)
+     * Cleanup old sent notifications (older than specified days)
      *
+     * @param int $days Number of days to keep (default: 30)
      * @return int Exit code
      */
-    public function actionCleanup(): int
+    public function actionCleanup(int $days = 30): int
     {
-        $this->stdout("Cleaning up old notifications...\n", \yii\helpers\Console::FG_CYAN);
+        $this->stdout("Cleaning up old notifications (older than {$days} days)...\n", \yii\helpers\Console::FG_CYAN);
 
-        $thirtyDaysAgo = time() - (30 * 24 * 60 * 60);
+        /** @var NotificationProcessingService $service */
+        $service = Yii::$app->get('notificationProcessingService');
 
-        $count = NotificationQueue::deleteAll([
-            'and',
-            ['status' => NotificationQueue::STATUS_SENT],
-            ['<', 'sent_at', $thirtyDaysAgo]
-        ]);
+        try {
+            $count = $service->cleanupOldNotifications($days);
 
-        $this->stdout("Deleted {$count} old sent notifications.\n", \yii\helpers\Console::FG_GREEN);
+            $this->stdout("Deleted {$count} old sent notifications.\n", \yii\helpers\Console::FG_GREEN);
 
-        return ExitCode::OK;
+            return ExitCode::OK;
+        } catch (\InvalidArgumentException $e) {
+            $this->stderr("Error: {$e->getMessage()}\n", \yii\helpers\Console::FG_RED);
+            return ExitCode::DATAERR;
+        }
+    }
+
+    /**
+     * Output processing result in formatted way
+     *
+     * @param \app\common\dto\NotificationProcessingResultDto $result
+     * @return void
+     */
+    private function outputProcessingResult(\app\common\dto\NotificationProcessingResultDto $result): void
+    {
+        $this->stdout("Found {$result->totalProcessed} notifications ready for sending.\n\n", \yii\helpers\Console::FG_CYAN);
+
+        // Output errors if any
+        if (!empty($result->errors)) {
+            foreach ($result->errors as $notificationId => $error) {
+                $this->stderr("Notification #{$notificationId}: {$error}\n", \yii\helpers\Console::FG_RED);
+            }
+            $this->stdout("\n");
+        }
+
+        // Output summary
+        $this->stdout("=====================================\n");
+        $this->stdout("Processing completed!\n", \yii\helpers\Console::FG_GREEN);
+        $this->stdout("Total processed: {$result->totalProcessed}\n");
+        $this->stdout("Successfully sent: {$result->successCount}\n", \yii\helpers\Console::FG_GREEN);
+        $this->stdout(
+            "Failed: {$result->failedCount}\n",
+            $result->failedCount > 0 ? \yii\helpers\Console::FG_RED : \yii\helpers\Console::FG_GREEN
+        );
+        $this->stdout(sprintf("Success rate: %.2f%%\n", $result->getSuccessRate()));
+        $this->stdout("=====================================\n");
     }
 }

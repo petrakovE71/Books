@@ -1,5 +1,9 @@
 <?php
 
+// Load environment variables
+$dotenv = Dotenv\Dotenv::createImmutable(__DIR__ . '/..');
+$dotenv->load();
+
 $params = require __DIR__ . '/params.php';
 $db = require __DIR__ . '/db.php';
 
@@ -26,6 +30,22 @@ $config = [
             ],
         ],
         'db' => $db,
+        // SMS Provider
+        'smsProvider' => [
+            'class' => 'app\components\sms\SmsPilotProvider',
+            'apiKey' => $_ENV['SMS_PILOT_API_KEY'] ?? 'XXXXXXXXXXXXYYYYYYYYYYYYZZZZZZZZXXXXXXXXXXXXYYYYYYYYYYYYZZZZZZZZ',
+            'testMode' => filter_var($_ENV['SMS_TEST_MODE'] ?? true, FILTER_VALIDATE_BOOLEAN),
+        ],
+        // SMS Service
+        'smsService' => [
+            'class' => 'app\components\sms\SmsService',
+            'provider' => function() { return Yii::$app->get('smsProvider'); },
+        ],
+        // Notification Processing Service
+        'notificationProcessingService' => [
+            'class' => 'app\common\services\NotificationProcessingService',
+            'smsService' => function() { return Yii::$app->get('smsService'); },
+        ],
     ],
     'params' => $params,
     /*
